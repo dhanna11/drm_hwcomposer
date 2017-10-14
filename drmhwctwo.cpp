@@ -483,9 +483,7 @@ void DrmHwcTwo::HwcDisplay::AddFenceToRetireFence(int fd) {
 
 HWC2::Error DrmHwcTwo::HwcDisplay::PresentDisplay(int32_t *retire_fence) {
   supported(__func__);
-  std::vector<DrmCompositionDisplayLayersMap> layers_map;
-  layers_map.emplace_back();
-  DrmCompositionDisplayLayersMap &map = layers_map.back();
+  DrmCompositionDisplayLayersMap map;
 
   map.display = static_cast<int>(handle_);
   map.geometry_changed = true;  // TODO: Fix this
