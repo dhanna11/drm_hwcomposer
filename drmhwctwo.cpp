@@ -828,7 +828,22 @@ void DrmHwcTwo::HwcLayer::PopulateDrmLayer(DrmHwcLayer *layer) {
   layer->SetSourceCrop(source_crop_);
   layer->SetTransform(static_cast<int32_t>(transform_));
 }
-
+  
+void DrmHwcTwo::HwcLayer::Dump(std::ostringstream &out) {
+  out << "SurfaceFlinger type: " << sf_type_;
+  out << "Validated type: " << validated_type_;
+  out << "z order: " << z_order_;
+  out << "buffer_handle_t: " << buffer_handle_t;
+  out << "android dataspace: " << dataspace_;
+  out << "transform: " << transform_;
+  out << "cursor x: " << cursor_x_;
+  out << "cursor y: " << cursor_y_;
+  out << "alpha : " << alpha_;
+  out << "release_fence: " << release_fence;
+  out << "source_crop_
+" <<;
+x}
+  
 // static
 int DrmHwcTwo::HookDevClose(hw_device_t * /*dev*/) {
   unsupported(__func__);

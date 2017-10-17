@@ -80,14 +80,16 @@ class DrmHwcTwo : public hwc2_device_t {
     }
     void manage_release_fence() {
       release_fence_.Set(release_fence_raw_);
-      release_fence_raw_ = -1;
-    }
+      release_fence_raw_ = -1; 
+   }
     OutputFd release_fence_output() {
       return OutputFd(&release_fence_raw_);
     }
 
     void PopulateDrmLayer(DrmHwcLayer *layer);
 
+    void Dump(std::ostringstream &out);
+    
     // Layer hooks
     HWC2::Error SetCursorPosition(int32_t x, int32_t y);
     HWC2::Error SetLayerBlendMode(int32_t mode);
