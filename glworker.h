@@ -36,15 +36,35 @@ namespace android {
 struct DrmHwcLayer;
 struct DrmCompositionRegion;
 
-class GLWorkerCompositor {
+ class GLWorkerCompositor : public Worker {
+   public:
+    GLWorkerCompositor();
+    virtual ~GLWorkerCompositor();
+
+    int Composite(std::vector<DrmHwcLayer> layers,
+		  std::vector<DrmCompositionRegion>,
+		  const sp<GraphicBuffer> &framebuffer,
+		  Importer *importer);
+
+    virtual void Routine();
+ private:
+    GLCompositor glCompositor_;
+ }
+ 
+class GLCompositor {
  public:
-  GLWorkerCompositor();
-  ~GLWorkerCompositor();
+  GLCompositor();
+  ~GLCompositor();
 
   int Init();
   int Composite(DrmHwcLayer *layers, DrmCompositionRegion *regions,
                 size_t num_regions, const sp<GraphicBuffer> &framebuffer,
                 Importer *importer);
+  void Composite(std::vector<DrmHwcLayer> layers,
+		 std::vector<DrmCompositionRegion>,
+		 const sp<GraphicBuffer> &framebuffer,
+		 std::shared_ptr<Importer> importer,
+		 std::function<void(int)> callback = NULL);
   void Finish();
 
  private:
@@ -89,6 +109,7 @@ class GLWorkerCompositor {
 
   std::vector<CachedFramebuffer> cached_framebuffers_;
 };
+ 
 }
 
 #endif

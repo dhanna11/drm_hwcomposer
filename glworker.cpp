@@ -143,7 +143,7 @@ static bool HasExtension(const char *extension, const char *extensions) {
   return false;
 }
 
-int GLWorkerCompositor::BeginContext() {
+int GLCompositor::BeginContext() {
   private_.saved_egl_display = eglGetCurrentDisplay();
   private_.saved_egl_ctx = eglGetCurrentContext();
 
@@ -162,7 +162,7 @@ int GLWorkerCompositor::BeginContext() {
   return 0;
 }
 
-int GLWorkerCompositor::EndContext() {
+int GLCompositor::EndContext() {
   if (private_.saved_egl_display != eglGetCurrentDisplay() ||
       private_.saved_egl_ctx != eglGetCurrentContext()) {
     if (!eglMakeCurrent(private_.saved_egl_display, private_.saved_egl_read,
@@ -469,11 +469,11 @@ static int CreateTextureFromHandle(EGLDisplay egl_display,
   return 0;
 }
 
-GLWorkerCompositor::GLWorkerCompositor()
+GLCompositor::GLCompositor()
     : egl_display_(EGL_NO_DISPLAY), egl_ctx_(EGL_NO_CONTEXT) {
 }
 
-int GLWorkerCompositor::Init() {
+int GLCompositor::Init() {
   int ret = 0;
   const char *egl_extensions;
   const char *gl_extensions;
@@ -572,24 +572,46 @@ int GLWorkerCompositor::Init() {
   return 0;
 }
 
-GLWorkerCompositor::~GLWorkerCompositor() {
+GLCompositor::~GLCompositor() {
   if (egl_display_ != EGL_NO_DISPLAY && egl_ctx_ != EGL_NO_CONTEXT)
     if (eglDestroyContext(egl_display_, egl_ctx_) == EGL_FALSE)
       ALOGE("Failed to destroy OpenGL ES Context: %s", GetEGLError());
 }
 
-int GLWorkerCompositor::Composite(DrmHwcLayer *layers,
+
+int GLCompositor::Composite(DrmHwcLayer *layers,
                                   DrmCompositionRegion *regions,
                                   size_t num_regions,
                                   const sp<GraphicBuffer> &framebuffer,
                                   Importer *importer) {
+
+  int ret;
+  Composite(std::vector<DrmHwcLayer> layers,
+		 std::vector<DrmCompositionRegion>,
+		 const sp<GraphicBuffer> &framebuffer,
+		 std::shared_ptr<Importer> importer,
+	    [&](ret));
+  return ret;
+
+}
+  void GLCompositor::Composite(std::vector<DrmHwcLayer> layers,
+		 std::vector<DrmCompositionRegion>,
+		 const sp<GraphicBuffer> &framebuffer,
+		 std::shared_ptr<Importer> importer,
+		 std::function<void(int)> callback) {
+
+
+
+  
+
+  
   ATRACE_CALL();
   int ret = 0;
   std::vector<AutoEGLImageAndGLTexture> layer_textures;
   std::vector<RenderingCommand> commands;
 
   if (num_regions == 0) {
-    return -EALREADY;
+    callback(-EALREADY);
   }
 
   ret = BeginContext();
@@ -721,7 +743,7 @@ int GLWorkerCompositor::Composite(DrmHwcLayer *layers,
   return ret;
 }
 
-void GLWorkerCompositor::Finish() {
+void GLCompositor::Finish() {
   ATRACE_CALL();
   glFinish();
 
@@ -737,7 +759,7 @@ void GLWorkerCompositor::Finish() {
   }
 }
 
-GLWorkerCompositor::CachedFramebuffer::CachedFramebuffer(
+GLCompositor::CachedFramebuffer::CachedFramebuffer(
     const sp<GraphicBuffer> &gb, AutoEGLDisplayImage &&image,
     AutoGLTexture &&tex, AutoGLFramebuffer &&fb)
     : strong_framebuffer(gb),
@@ -747,15 +769,15 @@ GLWorkerCompositor::CachedFramebuffer::CachedFramebuffer(
       gl_fb(std::move(fb)) {
 }
 
-bool GLWorkerCompositor::CachedFramebuffer::Promote() {
+bool GLCompositor::CachedFramebuffer::Promote() {
   if (strong_framebuffer.get() != NULL)
     return true;
   strong_framebuffer = weak_framebuffer.promote();
   return strong_framebuffer.get() != NULL;
 }
 
-GLWorkerCompositor::CachedFramebuffer *
-GLWorkerCompositor::FindCachedFramebuffer(
+GLCompositor::CachedFramebuffer *
+GLCompositor::FindCachedFramebuffer(
     const sp<GraphicBuffer> &framebuffer) {
   for (auto &fb : cached_framebuffers_)
     if (fb.weak_framebuffer == framebuffer)
@@ -763,8 +785,8 @@ GLWorkerCompositor::FindCachedFramebuffer(
   return NULL;
 }
 
-GLWorkerCompositor::CachedFramebuffer *
-GLWorkerCompositor::PrepareAndCacheFramebuffer(
+GLCompositor::CachedFramebuffer *
+GLCompositor::PrepareAndCacheFramebuffer(
     const sp<GraphicBuffer> &framebuffer) {
   CachedFramebuffer *cached_framebuffer = FindCachedFramebuffer(framebuffer);
   if (cached_framebuffer != NULL) {
@@ -820,7 +842,7 @@ GLWorkerCompositor::PrepareAndCacheFramebuffer(
   return &cached_framebuffers_.back();
 }
 
-GLint GLWorkerCompositor::PrepareAndCacheProgram(unsigned texture_count) {
+GLint GLCompositor::PrepareAndCacheProgram(unsigned texture_count) {
   if (blend_programs_.size() >= texture_count) {
     GLint program = blend_programs_[texture_count - 1].get();
     if (program != 0)
