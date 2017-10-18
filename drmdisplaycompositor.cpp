@@ -19,7 +19,6 @@
 
 #include "drmdisplaycompositor.h"
 
-#include <pthread.h>
 #include <sched.h>
 #include <stdlib.h>
 #include <time.h>
@@ -31,7 +30,6 @@
 #include <sync/sync.h>
 #include <utils/Trace.h>
 
-#include "autolock.h"
 #include "drmcrtc.h"
 #include "drmplane.h"
 #include "drmresources.h"
@@ -194,9 +192,7 @@ DrmDisplayCompositor::~DrmDisplayCompositor() {
   if (!initialized_)
     return;
 
-  int ret = pthread_mutex_lock(&lock_);
-  if (ret)
-    ALOGE("Failed to acquire compositor lock %d", ret);
+  std::lock_guard<std::mutex> lk(mutex_);
 
   if (mode_.blob_id)
     drm_->DestroyPropertyBlob(mode_.blob_id);
@@ -205,23 +201,11 @@ DrmDisplayCompositor::~DrmDisplayCompositor() {
 
   active_composition_.reset();
 
-  ret = pthread_mutex_unlock(&lock_);
-  if (ret)
-    ALOGE("Failed to acquire compositor lock %d", ret);
-
-  pthread_mutex_destroy(&lock_);
 }
 
 int DrmDisplayCompositor::Init(DrmResources *drm, int display) {
   drm_ = drm;
   display_ = display;
-
-  int ret = pthread_mutex_init(&lock_, NULL);
-  if (ret) {
-    ALOGE("Failed to initialize drm compositor lock %d\n", ret);
-    return ret;
-  }
-
   initialized_ = true;
   return 0;
 }
@@ -761,10 +745,7 @@ std::tuple<int, uint32_t> DrmDisplayCompositor::CreateModeBlob(
 }
 
 void DrmDisplayCompositor::ClearDisplay() {
-  AutoLock lock(&lock_, "compositor");
-  int ret = lock.Lock();
-  if (ret)
-    return;
+  std::lock_guard(std::mutex) lk(mutex_);
 
   if (!active_composition_)
     return;
@@ -796,16 +777,10 @@ void DrmDisplayCompositor::ApplyFrame(
   if (active_composition_)
     active_composition_->SignalCompositionDone();
 
-  ret = pthread_mutex_lock(&lock_);
-  if (ret)
-    ALOGE("Failed to acquire lock for active_composition swap");
+  std::lock_guard<std::mutex> lk(mutex_);
 
   active_composition_.swap(composition);
 
-  if (!ret)
-    ret = pthread_mutex_unlock(&lock_);
-  if (ret)
-    ALOGE("Failed to release lock for active_composition swap");
 }
 
 int DrmDisplayCompositor::ApplyComposition(
@@ -873,10 +848,7 @@ int DrmDisplayCompositor::ApplyComposition(
 }
 
 int DrmDisplayCompositor::SquashAll() {
-  AutoLock lock(&lock_, "compositor");
-  int ret = lock.Lock();
-  if (ret)
-    return ret;
+  std::unique_lock<std::mutex> lk(mutex_);
 
   if (!active_composition_)
     return 0;
@@ -885,7 +857,7 @@ int DrmDisplayCompositor::SquashAll() {
   ret = SquashFrame(active_composition_.get(), comp.get());
 
   // ApplyFrame needs the lock
-  lock.Unlock();
+  lk.Unlock();
 
   if (!ret)
     ApplyFrame(std::move(comp), 0);
@@ -1017,9 +989,7 @@ move_layers_back:
 }
 
 void DrmDisplayCompositor::Dump(std::ostringstream *out) const {
-  int ret = pthread_mutex_lock(&lock_);
-  if (ret)
-    return;
+  std::lock_guard<std::mutex> lk(mutex_);
 
   uint64_t num_frames = dump_frames_composited_;
   dump_frames_composited_ = 0;
@@ -1027,7 +997,6 @@ void DrmDisplayCompositor::Dump(std::ostringstream *out) const {
   struct timespec ts;
   ret = clock_gettime(CLOCK_MONOTONIC, &ts);
   if (ret) {
-    pthread_mutex_unlock(&lock_);
     return;
   }
 
@@ -1046,6 +1015,5 @@ void DrmDisplayCompositor::Dump(std::ostringstream *out) const {
 
   squash_state_.Dump(out);
 
-  pthread_mutex_unlock(&lock_);
 }
 }

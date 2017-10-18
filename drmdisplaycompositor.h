@@ -149,7 +149,7 @@ class DrmDisplayCompositor {
   DrmFramebuffer squash_framebuffers_[2];
 
   // mutable since we need to acquire in Dump()
-  mutable pthread_mutex_t lock_;
+  mutable std::mutex mutex_;
 
   // State tracking progress since our last Dump(). These are mutable since
   // we need to reset them on every Dump() call.
