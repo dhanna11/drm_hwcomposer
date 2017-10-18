@@ -578,46 +578,24 @@ GLCompositor::~GLCompositor() {
       ALOGE("Failed to destroy OpenGL ES Context: %s", GetEGLError());
 }
 
-
-int GLCompositor::Composite(DrmHwcLayer *layers,
-                                  DrmCompositionRegion *regions,
-                                  size_t num_regions,
-                                  const sp<GraphicBuffer> &framebuffer,
-                                  Importer *importer) {
-
-  int ret;
-  Composite(std::vector<DrmHwcLayer> layers,
-		 std::vector<DrmCompositionRegion>,
-		 const sp<GraphicBuffer> &framebuffer,
-		 std::shared_ptr<Importer> importer,
-	    [&](ret));
-  return ret;
-
-}
-  void GLCompositor::Composite(std::vector<DrmHwcLayer> layers,
-		 std::vector<DrmCompositionRegion>,
-		 const sp<GraphicBuffer> &framebuffer,
-		 std::shared_ptr<Importer> importer,
-		 std::function<void(int)> callback) {
-
-
-
-  
-
-  
+void GLCompositor::Composite(GLCompositorArgs args,
+			     std::function<void(int)> cb) {
+    
   ATRACE_CALL();
   int ret = 0;
   std::vector<AutoEGLImageAndGLTexture> layer_textures;
   std::vector<RenderingCommand> commands;
 
   if (num_regions == 0) {
-    callback(-EALREADY);
+    cb(-EALREADY);
+    return;
   }
 
   ret = BeginContext();
-  if (ret)
-    return -1;
-
+  if (ret) {
+    cb(ret);
+    return;
+  }
   GLint frame_width = framebuffer->getWidth();
   GLint frame_height = framebuffer->getHeight();
   CachedFramebuffer *cached_framebuffer =
@@ -625,42 +603,47 @@ int GLCompositor::Composite(DrmHwcLayer *layers,
   if (cached_framebuffer == NULL) {
     ALOGE("Composite failed because of failed framebuffer");
     EndContext();
-    return -EINVAL;
+    cb(-EINVAL);
+    return;
   }
 
   std::unordered_set<size_t> layers_used_indices;
-  for (size_t region_index = 0; region_index < num_regions; region_index++) {
-    DrmCompositionRegion &region = regions[region_index];
+  for (DrmCompositionRegion &region : regions) {
     layers_used_indices.insert(region.source_layers.begin(),
                                region.source_layers.end());
     commands.emplace_back();
     ConstructCommand(layers, region, commands.back());
   }
 
-  for (size_t layer_index = 0; layer_index < MAX_OVERLAPPING_LAYERS;
-       layer_index++) {
-    DrmHwcLayer *layer = &layers[layer_index];
+  size_t layer_index = 0;
+  for (DrmHwcLayer &layer : layers ) {
 
+    if (layer_index >= MAX_OVERLAPPING_LAYERS)
+      break;
+
+    // Should this be moved under the next line?
     layer_textures.emplace_back();
 
     if (layers_used_indices.count(layer_index) == 0)
       continue;
 
-    ret = CreateTextureFromHandle(egl_display_, layer->get_usable_handle(),
+    ret = CreateTextureFromHandle(egl_display_, layer.get_usable_handle(),
                                   importer, &layer_textures.back());
 
     if (!ret) {
-      ret = EGLFenceWait(egl_display_, layer->acquire_fence.Release());
+      ret = EGLFenceWait(egl_display_, layer.acquire_fence.Release());
     }
     if (ret) {
       layer_textures.pop_back();
       ret = -EINVAL;
     }
+    layer_index++;
   }
 
   if (ret) {
     EndContext();
-    return ret;
+    cb(ret);
+    return;
   }
 
   glViewport(0, 0, frame_width, frame_height);
@@ -740,7 +723,8 @@ int GLCompositor::Composite(DrmHwcLayer *layers,
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
   EndContext();
-  return ret;
+  cb(ret);
+  return;
 }
 
 void GLCompositor::Finish() {
@@ -860,4 +844,26 @@ GLint GLCompositor::PrepareAndCacheProgram(unsigned texture_count) {
   return 0;
 }
 
+int GLCompositorWorker::Composite(GLCompositorArgs args) {
+  Lock();
+  currentArgs_ = args;
+  int ret;
+  cb = std::function<void(int)> [&](int tempRet) {
+    ret = tempRet;
+  }
+  WaitForSignalOrExitLocked();
+  
+  return ret;
+}
+
+void GLCompositorWorker::Routine() {
+  if (!currentArgs_)
+    return;
+  
+  glCompositor_.Composite(currentArgs_, cb);
+  currentArgs_ = std::nullopt_t;
+  Signal();
+}
+
+  
 }  // namespace android

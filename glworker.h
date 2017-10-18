@@ -35,21 +35,27 @@ namespace android {
 
 struct DrmHwcLayer;
 struct DrmCompositionRegion;
-
- class GLWorkerCompositor : public Worker {
-   public:
+struct GLCompositorArgs {
+   std::vector<DrmHwcLayer> &layers;
+   std::vector<DrmCompositionRegion> &regions;
+   const sp<GraphicBuffer> &framebuffer;
+   Importer *importer;
+}
+ 
+class GLCompositorWorker : public Worker {
+ public:
     GLWorkerCompositor();
     virtual ~GLWorkerCompositor();
 
-    int Composite(std::vector<DrmHwcLayer> layers,
-		  std::vector<DrmCompositionRegion>,
-		  const sp<GraphicBuffer> &framebuffer,
-		  Importer *importer);
-
-    virtual void Routine();
+    int Composite(GLCompositorArgs args);
+ protected:
+    void Routine() override;
+   
  private:
     GLCompositor glCompositor_;
- }
+    std::optional<GLCompositorWorkerArgs> currentArgs_;
+    std::function<void(int)> cb;
+}
  
 class GLCompositor {
  public:
@@ -57,14 +63,8 @@ class GLCompositor {
   ~GLCompositor();
 
   int Init();
-  int Composite(DrmHwcLayer *layers, DrmCompositionRegion *regions,
-                size_t num_regions, const sp<GraphicBuffer> &framebuffer,
-                Importer *importer);
-  void Composite(std::vector<DrmHwcLayer> layers,
-		 std::vector<DrmCompositionRegion>,
-		 const sp<GraphicBuffer> &framebuffer,
-		 std::shared_ptr<Importer> importer,
-		 std::function<void(int)> callback = NULL);
+  void Composite(GLCompositorWorkerArgs args,
+		 std::function<void(int)> cb);
   void Finish();
 
  private:
