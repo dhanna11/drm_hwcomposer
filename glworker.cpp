@@ -578,9 +578,8 @@ GLWorkerCompositor::~GLWorkerCompositor() {
       ALOGE("Failed to destroy OpenGL ES Context: %s", GetEGLError());
 }
 
-int GLWorkerCompositor::Composite(DrmHwcLayer *layers,
-                                  DrmCompositionRegion *regions,
-                                  size_t num_regions,
+int GLWorkerCompositor::Composite(std::vector<DrmHwcLayer> layers,
+				  std::vector<DrmCompositionRegion> regions,
                                   const sp<GraphicBuffer> &framebuffer,
                                   Importer *importer) {
   ATRACE_CALL();
@@ -607,33 +606,36 @@ int GLWorkerCompositor::Composite(DrmHwcLayer *layers,
   }
 
   std::unordered_set<size_t> layers_used_indices;
-  for (size_t region_index = 0; region_index < num_regions; region_index++) {
-    DrmCompositionRegion &region = regions[region_index];
+  for (DrmCompositionRegion &region : regions) {
     layers_used_indices.insert(region.source_layers.begin(),
                                region.source_layers.end());
     commands.emplace_back();
     ConstructCommand(layers, region, commands.back());
   }
+  std::unordered_set<size_t> layers_used_indices;
+  size_t layer_index = 0;
+  for (DrmHwcLayer &layer : layers ) {
 
-  for (size_t layer_index = 0; layer_index < MAX_OVERLAPPING_LAYERS;
-       layer_index++) {
-    DrmHwcLayer *layer = &layers[layer_index];
+    if (layer_index >= MAX_OVERLAPPING_LAYERS)
+      break;
 
+    // Should this be moved under the next line?
     layer_textures.emplace_back();
 
     if (layers_used_indices.count(layer_index) == 0)
       continue;
 
-    ret = CreateTextureFromHandle(egl_display_, layer->get_usable_handle(),
+    ret = CreateTextureFromHandle(egl_display_, layer.get_usable_handle(),
                                   importer, &layer_textures.back());
 
     if (!ret) {
-      ret = EGLFenceWait(egl_display_, layer->acquire_fence.Release());
+      ret = EGLFenceWait(egl_display_, layer.acquire_fence.Release());
     }
     if (ret) {
       layer_textures.pop_back();
       ret = -EINVAL;
     }
+    layer_index++;
   }
 
   if (ret) {
