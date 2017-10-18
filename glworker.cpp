@@ -143,7 +143,7 @@ static bool HasExtension(const char *extension, const char *extensions) {
   return false;
 }
 
-int GLWorkerCompositor::BeginContext() {
+int GLCompositor::BeginContext() {
   private_.saved_egl_display = eglGetCurrentDisplay();
   private_.saved_egl_ctx = eglGetCurrentContext();
 
@@ -162,7 +162,7 @@ int GLWorkerCompositor::BeginContext() {
   return 0;
 }
 
-int GLWorkerCompositor::EndContext() {
+int GLCompositor::EndContext() {
   if (private_.saved_egl_display != eglGetCurrentDisplay() ||
       private_.saved_egl_ctx != eglGetCurrentContext()) {
     if (!eglMakeCurrent(private_.saved_egl_display, private_.saved_egl_read,
@@ -469,11 +469,11 @@ static int CreateTextureFromHandle(EGLDisplay egl_display,
   return 0;
 }
 
-GLWorkerCompositor::GLWorkerCompositor()
+GLCompositor::GLCompositor()
     : egl_display_(EGL_NO_DISPLAY), egl_ctx_(EGL_NO_CONTEXT) {
 }
 
-int GLWorkerCompositor::Init() {
+int GLCompositor::Init() {
   int ret = 0;
   const char *egl_extensions;
   const char *gl_extensions;
@@ -572,30 +572,30 @@ int GLWorkerCompositor::Init() {
   return 0;
 }
 
-GLWorkerCompositor::~GLWorkerCompositor() {
+GLCompositor::~GLCompositor() {
   if (egl_display_ != EGL_NO_DISPLAY && egl_ctx_ != EGL_NO_CONTEXT)
     if (eglDestroyContext(egl_display_, egl_ctx_) == EGL_FALSE)
       ALOGE("Failed to destroy OpenGL ES Context: %s", GetEGLError());
 }
 
-int GLWorkerCompositor::Composite(DrmHwcLayer *layers,
-                                  DrmCompositionRegion *regions,
-                                  size_t num_regions,
-                                  const sp<GraphicBuffer> &framebuffer,
-                                  Importer *importer) {
+void GLCompositor::Composite(GLCompositorArgs args,
+			     std::function<void(int)> cb) {
+    
   ATRACE_CALL();
   int ret = 0;
   std::vector<AutoEGLImageAndGLTexture> layer_textures;
   std::vector<RenderingCommand> commands;
 
   if (num_regions == 0) {
-    return -EALREADY;
+    cb(-EALREADY);
+    return;
   }
 
   ret = BeginContext();
-  if (ret)
-    return -1;
-
+  if (ret) {
+    cb(ret);
+    return;
+  }
   GLint frame_width = framebuffer->getWidth();
   GLint frame_height = framebuffer->getHeight();
   CachedFramebuffer *cached_framebuffer =
@@ -603,42 +603,47 @@ int GLWorkerCompositor::Composite(DrmHwcLayer *layers,
   if (cached_framebuffer == NULL) {
     ALOGE("Composite failed because of failed framebuffer");
     EndContext();
-    return -EINVAL;
+    cb(-EINVAL);
+    return;
   }
 
   std::unordered_set<size_t> layers_used_indices;
-  for (size_t region_index = 0; region_index < num_regions; region_index++) {
-    DrmCompositionRegion &region = regions[region_index];
+  for (DrmCompositionRegion &region : regions) {
     layers_used_indices.insert(region.source_layers.begin(),
                                region.source_layers.end());
     commands.emplace_back();
     ConstructCommand(layers, region, commands.back());
   }
 
-  for (size_t layer_index = 0; layer_index < MAX_OVERLAPPING_LAYERS;
-       layer_index++) {
-    DrmHwcLayer *layer = &layers[layer_index];
+  size_t layer_index = 0;
+  for (DrmHwcLayer &layer : layers ) {
 
+    if (layer_index >= MAX_OVERLAPPING_LAYERS)
+      break;
+
+    // Should this be moved under the next line?
     layer_textures.emplace_back();
 
     if (layers_used_indices.count(layer_index) == 0)
       continue;
 
-    ret = CreateTextureFromHandle(egl_display_, layer->get_usable_handle(),
+    ret = CreateTextureFromHandle(egl_display_, layer.get_usable_handle(),
                                   importer, &layer_textures.back());
 
     if (!ret) {
-      ret = EGLFenceWait(egl_display_, layer->acquire_fence.Release());
+      ret = EGLFenceWait(egl_display_, layer.acquire_fence.Release());
     }
     if (ret) {
       layer_textures.pop_back();
       ret = -EINVAL;
     }
+    layer_index++;
   }
 
   if (ret) {
     EndContext();
-    return ret;
+    cb(ret);
+    return;
   }
 
   glViewport(0, 0, frame_width, frame_height);
@@ -718,10 +723,11 @@ int GLWorkerCompositor::Composite(DrmHwcLayer *layers,
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
   EndContext();
-  return ret;
+  cb(ret);
+  return;
 }
 
-void GLWorkerCompositor::Finish() {
+void GLCompositor::Finish() {
   ATRACE_CALL();
   glFinish();
 
@@ -737,7 +743,7 @@ void GLWorkerCompositor::Finish() {
   }
 }
 
-GLWorkerCompositor::CachedFramebuffer::CachedFramebuffer(
+GLCompositor::CachedFramebuffer::CachedFramebuffer(
     const sp<GraphicBuffer> &gb, AutoEGLDisplayImage &&image,
     AutoGLTexture &&tex, AutoGLFramebuffer &&fb)
     : strong_framebuffer(gb),
@@ -747,15 +753,15 @@ GLWorkerCompositor::CachedFramebuffer::CachedFramebuffer(
       gl_fb(std::move(fb)) {
 }
 
-bool GLWorkerCompositor::CachedFramebuffer::Promote() {
+bool GLCompositor::CachedFramebuffer::Promote() {
   if (strong_framebuffer.get() != NULL)
     return true;
   strong_framebuffer = weak_framebuffer.promote();
   return strong_framebuffer.get() != NULL;
 }
 
-GLWorkerCompositor::CachedFramebuffer *
-GLWorkerCompositor::FindCachedFramebuffer(
+GLCompositor::CachedFramebuffer *
+GLCompositor::FindCachedFramebuffer(
     const sp<GraphicBuffer> &framebuffer) {
   for (auto &fb : cached_framebuffers_)
     if (fb.weak_framebuffer == framebuffer)
@@ -763,8 +769,8 @@ GLWorkerCompositor::FindCachedFramebuffer(
   return NULL;
 }
 
-GLWorkerCompositor::CachedFramebuffer *
-GLWorkerCompositor::PrepareAndCacheFramebuffer(
+GLCompositor::CachedFramebuffer *
+GLCompositor::PrepareAndCacheFramebuffer(
     const sp<GraphicBuffer> &framebuffer) {
   CachedFramebuffer *cached_framebuffer = FindCachedFramebuffer(framebuffer);
   if (cached_framebuffer != NULL) {
@@ -820,7 +826,7 @@ GLWorkerCompositor::PrepareAndCacheFramebuffer(
   return &cached_framebuffers_.back();
 }
 
-GLint GLWorkerCompositor::PrepareAndCacheProgram(unsigned texture_count) {
+GLint GLCompositor::PrepareAndCacheProgram(unsigned texture_count) {
   if (blend_programs_.size() >= texture_count) {
     GLint program = blend_programs_[texture_count - 1].get();
     if (program != 0)
@@ -838,4 +844,26 @@ GLint GLWorkerCompositor::PrepareAndCacheProgram(unsigned texture_count) {
   return 0;
 }
 
+int GLCompositorWorker::Composite(GLCompositorArgs args) {
+  Lock();
+  currentArgs_ = args;
+  int ret;
+  cb = std::function<void(int)> [&](int tempRet) {
+    ret = tempRet;
+  }
+  WaitForSignalOrExitLocked();
+  
+  return ret;
+}
+
+void GLCompositorWorker::Routine() {
+  if (!currentArgs_)
+    return;
+  
+  glCompositor_.Composite(currentArgs_, cb);
+  currentArgs_ = std::nullopt_t;
+  Signal();
+}
+
+  
 }  // namespace android
